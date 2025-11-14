@@ -12,26 +12,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import httpx
 
-# ----------------- ЛОГИ -----------------
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 
-# ----------------- IN-MEMORY STORAGE -----------------
 sync_storage: Dict[int, Dict[str, Any]] = {}
 
-# ----------------- FASTAPI APP -----------------
 app = FastAPI(title="Focus Assistant API")
 
-# CORS (для фронта на GitHub Pages)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("WEBAPP_ORIGIN", "*")],  # например: https://enionis.github.io
+    allow_origins=[os.getenv("WEBAPP_ORIGIN", "*")], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ----------------- ROOT & HEALTH -----------------
+
 @app.get("/")
 async def root():
     return {"ok": True, "service": "focus-assistant-api"}
@@ -55,7 +51,6 @@ async def lm_health():
     except Exception as e:
         return {"ok": False, "base_url": base_url, "error": str(e)}
 
-# ----------------- МОДЕЛИ ДАННЫХ ДЛЯ /sync -----------------
 class SyncData(BaseModel):
     userId: int
     settings: Optional[Dict[str, Any]] = None
@@ -124,7 +119,6 @@ async def get_sync_data(userId: int):
         logger.exception("Ошибка получения данных")
         raise HTTPException(status_code=500, detail=f"Ошибка получения данных: {e}")
 
-# ----------------- /analyze_task через LM Studio -----------------
 class AnalyzeTaskRequest(BaseModel):
     userId: int
     description: str = Field(..., description="Текст задачи")
