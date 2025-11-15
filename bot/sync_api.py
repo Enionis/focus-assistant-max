@@ -47,7 +47,6 @@ async def lm_health():
     except Exception as e:
         return {"ok": False, "base_url": base_url, "error": str(e)}
 
->>>>>>> 3738b44c3f1edb30cac1cd1630769737c254ecf6
 class SyncData(BaseModel):
     userId: int
     settings: Optional[Dict[str, Any]] = None
@@ -129,8 +128,6 @@ async def get_sync_data(userId: int):
         logger.error(f"Ошибка получения данных: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Ошибка получения данных: {str(e)}")
 
-<<<<<<< HEAD
-=======
 class AnalyzeTaskRequest(BaseModel):
     userId: int
     description: str = Field(..., description="Текст задачи")
@@ -222,4 +219,3 @@ async def analyze_task(req: AnalyzeTaskRequest):
     except Exception as e:
         logger.exception("Analyze error")
         raise HTTPException(status_code=500, detail=f"Ошибка анализа задачи: {e}")
->>>>>>> 3738b44c3f1edb30cac1cd1630769737c254ecf6
