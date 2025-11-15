@@ -1,4 +1,8 @@
 import logging
+import os
+import asyncio
+import json
+import aiohttp
 from datetime import datetime
 from pathlib import Path
 from maxapi import F, Router
@@ -9,6 +13,7 @@ from maxapi.types import LinkButton
 from maxapi.context import State, StatesGroup
 from maxapi.types.input_media import InputMedia
 from maxapi.types.errors import Error
+from states import UserStates
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +76,6 @@ async def send_event_message(
             )
 
     return response
-
-class UserStates(StatesGroup):
-    waiting_task_description = State()
-    waiting_deadline = State()
-    editing_subtask = State()
-    pomodoro_active = State()
 
 class UserData:
     def __init__(self):
@@ -161,6 +160,9 @@ async def quick_start_handler(event: MessageCallback, context: MemoryContext):
     builder.row(
         {"text": "ℹ️ Как работает", "payload": "how_it_works"}
     )
+    builder.row(
+        {"text": "🤖 Умный помощник", "payload": "ai_assistant"}
+    )
 
     welcome_text = """📱 Открой веб-приложение для удобной работы с задачами!
 
@@ -176,6 +178,82 @@ async def quick_start_handler(event: MessageCallback, context: MemoryContext):
         text=welcome_text, 
         attachments=[builder.as_markup()]
     )
+
+# Обработчик AI помощника должен быть зарегистрирован раньше команд
+@router.message_created(UserStates.waiting_ai_question)
+async def handle_ai_question(event: MessageCreated, context: MemoryContext):
+    """Обработка вопросов пользователя к AI"""
+    try:
+        logger.info("Обработчик AI вопроса вызван")
+        
+        # Проверяем текущее состояние
+        current_state = await context.get_state()
+        logger.info(f"Текущее состояние: {current_state}")
+        
+        # Получаем текст сообщения - в maxapi текст находится в event.message.body.text
+        question = None
+        
+        if hasattr(event, 'message') and event.message:
+            if hasattr(event.message, 'body') and event.message.body:
+                # body - это объект MessageBody, у которого есть атрибут text
+                if hasattr(event.message.body, 'text'):
+                    question = event.message.body.text
+                    logger.info(f"Текст сообщения: {question}")
+        
+        # Если не нашли, пробуем альтернативные способы
+        if not question:
+            if hasattr(event, 'message') and hasattr(event.message, 'text'):
+                question = event.message.text
+                logger.info(f"Текст из event.message.text: {question}")
+        
+        logger.info(f"Итоговый текст сообщения: {question}")
+        
+        # Проверяем, что это не команда
+        if question and question.startswith('/'):
+            logger.info("Пропущена команда в режиме AI")
+            return
+        
+        if not question or not question.strip():
+            logger.warning("Получено пустое сообщение в режиме AI")
+            builder = InlineKeyboardBuilder()
+            builder.row({"text": "◀️ Выйти из чата", "payload": "back_to_main"})
+            await send_event_message(event, "Пожалуйста, задайте вопрос текстом.", attachments=[builder.as_markup()])
+            return
+        
+        logger.info(f"Обработка вопроса к AI: {question[:50]}...")
+        
+        # Отправляем сообщение о том, что обрабатываем запрос
+        builder = InlineKeyboardBuilder()
+        builder.row({"text": "◀️ Выйти из чата", "payload": "back_to_main"})
+        
+        await send_event_message(
+            event,
+            "🤔 Думаю...",
+            attachments=[builder.as_markup()]
+        )
+        
+        # Получаем ответ от AI
+        answer = await ask_openrouter(question)
+        logger.info(f"Получен ответ от AI (длина: {len(answer)})")
+        
+        # Отправляем ответ
+        builder = InlineKeyboardBuilder()
+        builder.row({"text": "◀️ Выйти из чата", "payload": "back_to_main"})
+        
+        await send_event_message(
+            event,
+            answer,
+            attachments=[builder.as_markup()]
+        )
+    except Exception as e:
+        logger.error(f"Ошибка в обработчике AI вопроса: {e}", exc_info=True)
+        builder = InlineKeyboardBuilder()
+        builder.row({"text": "◀️ Выйти из чата", "payload": "back_to_main"})
+        await send_event_message(
+            event,
+            f"❌ Произошла ошибка при обработке вопроса: {str(e)}",
+            attachments=[builder.as_markup()]
+        )
 
 @router.message_created(Command("start"))
 async def start_command(event: MessageCreated, context: MemoryContext):
@@ -255,6 +333,10 @@ async def start_command(event: MessageCreated, context: MemoryContext):
             {"text": "ℹ️ Как работает", "payload": "how_it_works"}
         )
         logger.info("Кнопка 'Как работает' добавлена")
+        builder.row(
+            {"text": "🤖 Умный помощник", "payload": "ai_assistant"}
+        )
+        logger.info("Кнопка 'Умный помощник' добавлена")
 
         welcome_text = """📱 Открой веб-приложение для удобной работы с задачами!
 
@@ -298,6 +380,9 @@ async def help_command(event: MessageCreated, context: MemoryContext):
         )
     builder.row(
         {"text": "ℹ️ Как работает", "payload": "how_it_works"}
+    )
+    builder.row(
+        {"text": "🤖 Умный помощник", "payload": "ai_assistant"}
     )
     
     await send_event_message(event, text=help_text, attachments=[builder.as_markup()])
@@ -534,6 +619,9 @@ async def back_to_main(event: MessageCallback, context: MemoryContext):
     builder.row(
         {"text": "ℹ️ Как работает", "payload": "how_it_works"}
     )
+    builder.row(
+        {"text": "🤖 Умный помощник", "payload": "ai_assistant"}
+    )
 
     welcome_text = """🎯 FocusHelper!
 
@@ -554,5 +642,111 @@ async def complete_session(event: MessageCallback, context: MemoryContext):
     await send_event_message(
         event,
         "🎉 Сессия завершена! +10 XP\n\nОтдохни и продолжи!",
+        attachments=[builder.as_markup()]
+    )
+
+async def ask_openrouter(question: str) -> str:
+    """Отправка запроса в OpenRouter API с fallback на несколько моделей"""
+    api_key = os.getenv('OPENROUTER_API_KEY')
+    if not api_key:
+        logger.error("OPENROUTER_API_KEY не установлен в переменных окружения")
+        return "❌ Ошибка: API ключ не настроен. Обратитесь к администратору."
+    
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://max.ru/t122_hakaton_bot",
+        "X-Title": "FocusHelper Bot"
+    }
+    
+    # Список моделей для попыток (в порядке приоритета)
+    models = [
+        "anthropic/claude-3-haiku",  # Быстрая и доступная модель
+        "meta-llama/llama-3.2-3b-instruct",  # Бесплатная модель
+        "mistralai/mistral-7b-instruct",  # Бесплатная модель
+        "google/gemini-pro",  # Gemini Pro
+    ]
+    
+    system_message = {
+        "role": "system",
+        "content": "Ты умный помощник в боте FocusHelper. Помогай пользователям с вопросами о продуктивности, планировании задач, технике Pomodoro и других вопросах. Отвечай кратко и по делу."
+    }
+    
+    user_message = {
+        "role": "user",
+        "content": question
+    }
+    
+    # Пробуем каждую модель по очереди
+    for model in models:
+        try:
+            logger.info(f"Пробую модель: {model}")
+            payload = {
+                "model": model,
+                "messages": [system_message, user_message]
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if 'choices' in data and len(data['choices']) > 0:
+                            logger.info(f"Успешно получен ответ от модели {model}")
+                            return data['choices'][0]['message']['content']
+                        else:
+                            logger.error(f"Неожиданный формат ответа от OpenRouter: {data}")
+                            continue  # Пробуем следующую модель
+                    else:
+                        error_text = await response.text()
+                        logger.warning(f"Ошибка OpenRouter API для модели {model}: {response.status} - {error_text}")
+                        
+                        # Если это ошибка региона, пробуем следующую модель
+                        try:
+                            error_data = json.loads(error_text)
+                            error_msg = error_data.get('error', {}).get('message', '')
+                            if 'country' in error_msg.lower() or 'region' in error_msg.lower() or 'territory' in error_msg.lower():
+                                logger.info(f"Модель {model} не поддерживает регион, пробую следующую")
+                                continue
+                        except:
+                            pass
+                        
+                        # Если это 404 (модель не найдена), пробуем следующую
+                        if response.status == 404:
+                            logger.info(f"Модель {model} не найдена, пробую следующую")
+                            continue
+                        
+                        # Для других ошибок пробуем следующую модель
+                        continue
+        except asyncio.TimeoutError:
+            logger.warning(f"Таймаут при запросе к модели {model}, пробую следующую")
+            continue
+        except Exception as e:
+            logger.warning(f"Ошибка при запросе к модели {model}: {e}, пробую следующую")
+            continue
+    
+    # Если все модели не сработали
+    return "❌ Не удалось получить ответ от AI. Все доступные модели недоступны. Попробуйте позже."
+
+@router.message_callback(F.callback.payload == "ai_assistant")
+async def ai_assistant_handler(event: MessageCallback, context: MemoryContext):
+    """Обработчик кнопки 'Умный помощник'"""
+    logger.info("Кнопка 'Умный помощник' нажата, устанавливаю состояние")
+    await context.set_state(UserStates.waiting_ai_question)
+    
+    # Проверяем, что состояние установлено
+    current_state = await context.get_state()
+    logger.info(f"Текущее состояние после установки: {current_state}")
+    
+    builder = InlineKeyboardBuilder()
+    builder.row({"text": "◀️ Выйти из чата", "payload": "back_to_main"})
+    
+    await send_event_message(
+        event,
+        "🤖 Привет! Я умный помощник. Задай мне любой вопрос, и я постараюсь помочь!\n\n"
+        "Например:\n"
+        "• Как лучше планировать задачи?\n"
+        "• Что такое техника Pomodoro?\n"
+        "• Как повысить продуктивность?",
         attachments=[builder.as_markup()]
     )

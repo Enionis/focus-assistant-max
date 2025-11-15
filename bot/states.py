@@ -5,6 +5,7 @@ class UserStates(StatesGroup):
     waiting_deadline = State()
     editing_subtask = State()
     pomodoro_active = State()
+    waiting_ai_question = State()
 
 class UserData:
     def __init__(self):
